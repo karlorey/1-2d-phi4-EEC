@@ -20,19 +20,24 @@ H, φ, φ2, φ4, Π, Π2 = phi4_model(N, m2, m0, l, Dim, d, a)
 
 ### Ground state optimization parameters ###
 boundary_alg = (; tol = 1e-8, trunc = (; alg = :FixedSpaceTruncation));
-optimizer_alg = (; alg = :LBFGS, tol = 1e-6, maxiter = parse(Int, ARGS[8]), lbfgs_memory = 16);
+optimizer_alg = (; alg = :LBFGS, tol = 1e-4, maxiter = parse(Int, ARGS[8]), lbfgs_memory = 20);
 reuse_env = true
 verbosity = 3;
 
 ### Initialize PEPS and CTMRG environment
-peps₀ = InfinitePEPS(randn, ComplexF64, ℂ^Dim, ℂ^Dbond; unitcell=(N, N))
-env_random = CTMRGEnv(randn, ComplexF64, peps₀, ℂ^χ);
-env₀, info_ctmrg = leading_boundary(env_random, peps₀; boundary_alg...)
+using JLD2
+if parse(Bool, ARGS[9])
+    peps₀ = load_object("VacStates/" * get(ARGS, 10, "PEPS,N=$N,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2"))
+    env₀ = load_object("VacStates/" * get(ARGS, 11, "env,N=$N,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2"))
+else
+    peps₀ = InfinitePEPS(randn, ComplexF64, ℂ^Dim, ℂ^Dbond; unitcell=(N, N))
+    env_random = CTMRGEnv(randn, ComplexF64, peps₀, ℂ^χ);
+    env₀, info_ctmrg = leading_boundary(env_random, peps₀; boundary_alg...)
+end
 
 ### Find the ground state ∣Ω⟩ ###
 peps_gs, env_gs, E, info_opt = fixedpoint(H, peps₀, env₀; boundary_alg, optimizer_alg, reuse_env, verbosity)
 
 ### Save PEPS and CTMRG environment ###
-using JLD2
 save_object("VacStates/PEPS,N=$N,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2", peps_gs)
 save_object("VacStates/env,N=$N,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2", env_gs)
