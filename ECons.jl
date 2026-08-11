@@ -1,8 +1,8 @@
 using PEPSKit, TensorKit
 
 ### Model Parameters ###
-N = parse(Int, ARGS[1]) #Number of sites in unit cell
-n_0 = round(Int, ((N-1)/2))+1 #Index of the point at the center of the lattice (1-based indexing).
+L = parse(Int, ARGS[1]) #Length/width of unit cell
+n_0 = round(Int, ((L-1)/2))+1 #Index of the point at the center of the lattice (1-based indexing).
 m2 = parse(Float64, ARGS[2]) #Bare mass (squared)
 m0 = 1 #Basis frequency
 l = parse(Float64, ARGS[3]) #phi^4 coupling strength
@@ -17,12 +17,12 @@ Dbond = parse(Int, ARGS[9])
 
 ### phi4 Hamiltonian ###
 include("phi4_Hamiltonian.jl")
-H, φ, φ2, φ4, Π, Π2 = phi4_model(N, m2, m0, l, Dim, d, a)
+H, φ, φ2, φ4, Π, Π2 = phi4_model(L, m2, m0, l, Dim, d, a)
 
 ### Load ground state PEPS and CTMRG environment ###
 using JLD2
-peps_gs = load_object("VacStates/PEPS,N=$N,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
-env_gs = load_object("VacStates/env,N=$N,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+peps_gs = load_object("VacStates/PEPS,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+env_gs = load_object("VacStates/env,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
 
 ### Apply φ(0) to ∣Ω⟩ ###
 Ω = deepcopy(peps_gs)
@@ -33,7 +33,7 @@ T0i_TMap = 1/2 * (φ ⊗ Π - Π ⊗ φ) #Energy flux TensorMap
 h_site = a^d * ((1/2 * Π2) + (1/a^2 * φ2) + (1/a^2 * φ2) + (1/2 * m2 * φ2) + (l/24 * φ4)) #Onsite Hamiltonian TensorMap
 h_bond = -1/2 * a^d * 1/a^2 * φ ⊗ φ #Nearest-neighbor interaction Hamiltonian TensorMap (split into four directions)
 
-lattice = fill(V, N, N)
+lattice = fill(V, L, L)
 T0i = LocalOperator(lattice,
     [(n_0, n_0), (n_0+1, n_0)] => T0i_TMap,
     [(n_0, n_0), (n_0-1, n_0)] => T0i_TMap,
@@ -60,9 +60,9 @@ trunc_peps = truncerror(; atol = 1e-10) & truncrank(Dbond)
 alg = SimpleUpdate(; trunc = trunc_peps, imaginary_time = false) #Time evolution algorithm
 boundary_alg = (; tol = 1e-8, trunc = (; alg = :FixedSpaceTruncation)) #CTMRG boundary algorithm
 
-ψ = Ω
-env = env_gs
-wts = SUWeight(Ω)
+ψ = Ω #Initialize the iPEPS ψ as the excited vacuum state iPEPS Ω
+env, info_ctmrg = leading_boundary(env_gs, Ω; boundary_alg...) #Initialize the env with Ω
+wts = SUWeight(Ω) #Initialize the simple update weights with Ω
 
 Edens0 = ComplexF64[]
 Eflux = ComplexF64[]
@@ -70,8 +70,8 @@ Eflux = ComplexF64[]
 ### Perform time evolution ###
 for i in 1:length(t_range)
     if i == 1 #t=0
-        evH = expectation_value(Ω, H0, env_gs)
-        evT0i = expectation_value(Ω, T0i, env_gs)
+        evH = expectation_value(Ω, H0, env)
+        evT0i = expectation_value(Ω, T0i, env)
     else #t>0
         global ψ, env, wts
         ψ, wts = time_evolve(ψ, H, δt, nsteps, alg, wts)
@@ -87,7 +87,7 @@ end
 
 ### Save Data ###
 using HDF5
-data = h5open("ECons_data/EVs,N=$N,m2=$m2,l=$l,ti=$ti,tf=$tf,dt=$Δt,a=$a,dim=$Dim,D=$Dbond,chi=$χ.h5", "w")
+data = h5open("ECons_data/EVs,L=$L,m2=$m2,l=$l,ti=$ti,tf=$tf,dt=$Δt,a=$a,dim=$Dim,D=$Dbond,chi=$χ.h5", "w")
 data["Edens0"] = Edens0
 data["Eflux"] = Eflux
 close(data)
