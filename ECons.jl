@@ -74,7 +74,7 @@ for i in 1:length(t_range)
         evT0i = expectation_value(Ω, T0i, env)
     else #t>0
         global ψ, env, wts
-        ψ, wts = time_evolve(ψ, H, δt, nsteps, alg, wts)
+        ψ, wts = time_evolve(ψ, H, δt, nsteps, alg, wts; symmetrize_gates = true, check_interval = 10)
         env, info_ctmrg = leading_boundary(env, ψ; boundary_alg...)
 
         evH = expectation_value(ψ, H0, env)
