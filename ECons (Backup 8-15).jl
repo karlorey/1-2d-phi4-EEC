@@ -19,30 +19,14 @@ Dbond = parse(Int, ARGS[9])
 include("phi4_Hamiltonian.jl")
 H, φ, φ2, φ4, Π, Π2 = phi4_model(L, m2, m0, l, Dim, d, a)
 
-### Load PEPS and CTMRG environment ###
+### Load ground state PEPS and CTMRG environment ###
 using JLD2
-function LoadState()
-    if !parse(Bool, ARGS[12])
-        #Load ground state
-        peps_gs = load_object("VacStates/PEPS,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
-        env_gs = load_object("VacStates/env,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+peps_gs = load_object("VacStates/PEPS,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+env_gs = load_object("VacStates/env,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
 
-        #Apply φ(0) to ∣Ω⟩
-        Ω = deepcopy(peps_gs)
-        Ω.A[n_0, n_0] = φ * Ω.A[n_0, n_0]
-
-        #Construct PEPS and env from φ(0)∣Ω⟩
-        boundary_alg = (; tol = 1e-8, trunc = (; alg = :FixedSpaceTruncation)) #CTMRG boundary algorithm
-        ψ = Ω #Initialize the iPEPS ψ as the excited vacuum state iPEPS Ω
-        env, info_ctmrg = leading_boundary(env_gs, ψ; boundary_alg...) #Initialize the env with ψ
-        wts = SUWeight(ψ) #Initialize the simple update weights with ψ
-    else
-        #Load previous state
-        ψ, env, wts = load("EvolStates/ECons,L=$L,m2=$m2,l=$l,ti=0.0,tf=$(parse(Float64, ARGS[13])),dt=$Δt,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
-    end
-
-    return ψ, env, wts
-end
+### Apply φ(0) to ∣Ω⟩ ###
+Ω = deepcopy(peps_gs)
+Ω.A[n_0, n_0] = φ * Ω.A[n_0, n_0]
 
 ### Define T₀ᵢ(x) and H(0) ###
 T0i_TMap = 1/2 * (φ ⊗ Π - Π ⊗ φ) #Energy flux TensorMap
@@ -74,34 +58,32 @@ t_range = range(ti, tf, step=Δt) #Time range
 ### Initialize time evolution (real-time SimpleUpdate) ###
 trunc_peps = truncerror(; atol = 1e-10) & truncrank(Dbond)
 alg = SimpleUpdate(; trunc = trunc_peps, imaginary_time = false) #Time evolution algorithm
+boundary_alg = (; tol = 1e-8, trunc = (; alg = :FixedSpaceTruncation)) #CTMRG boundary algorithm
+
+ψ = Ω #Initialize the iPEPS ψ as the excited vacuum state iPEPS Ω
+env, info_ctmrg = leading_boundary(env_gs, Ω; boundary_alg...) #Initialize the env with Ω
+wts = SUWeight(Ω) #Initialize the simple update weights with Ω
+
+Edens0 = ComplexF64[]
+Eflux = ComplexF64[]
 
 ### Perform time evolution ###
-function Evolve()
-    ψ, env, wts = LoadState()
-    Edens0 = ComplexF64[]
-    Eflux = ComplexF64[]
+for i in 1:length(t_range)
+    if i == 1 #t=0
+        evH = expectation_value(Ω, H0, env)
+        evT0i = expectation_value(Ω, T0i, env)
+    else #t>0
+        global ψ, env, wts
+        ψ, wts = time_evolve(ψ, H, δt, nsteps, alg, wts; symmetrize_gates = true, check_interval = 10)
+        env, info_ctmrg = leading_boundary(env, ψ; boundary_alg...)
 
-    for t in t_range
-        if t == 0 #t=0
-            evH = expectation_value(ψ, H0, env)
-            evT0i = expectation_value(ψ, T0i, env)
-        else #t>0
-            ψ, wts = time_evolve(ψ, H, δt, nsteps, alg, wts; symmetrize_gates = parse(Bool, ARGS[11]), check_interval = 10)
-            env, info_ctmrg = leading_boundary(env, ψ; boundary_alg...)
-
-            evH = expectation_value(ψ, H0, env)
-            evT0i = expectation_value(ψ, T0i, env)
-        end
-
-        push!(Edens0, evH)
-        push!(Eflux, evT0i)
+        evH = expectation_value(ψ, H0, env)
+        evT0i = expectation_value(ψ, T0i, env)
     end
 
-    #Save the state, return the energy density and energy flux
-    jldsave("EvolStates/ECons,L=$L,m2=$m2,l=$l,ti=0.0,tf=$tf,dt=$Δt,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2"; ψ, env, wts)
-    return Edens0, Eflux
+    push!(Edens0, evH)
+    push!(Eflux, evT0i)
 end
-Edens0, Eflux = Evolve()
 
 ### Save Data ###
 using HDF5
