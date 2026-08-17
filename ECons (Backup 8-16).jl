@@ -21,16 +21,33 @@ H, φ, φ2, φ4, Π, Π2 = phi4_model(L, m2, m0, l, Dim, d, a)
 
 ### Load PEPS and CTMRG environment ###
 using JLD2
+boundary_alg = (; tol = 1e-8, trunc = (; alg = :FixedSpaceTruncation)) #CTMRG boundary algorithm
 function LoadState()
     if !parse(Bool, ARGS[12])
-        #Load excited state
-        ψ, env, wts = load("ExcStates/Exc,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+        #Load ground state
+        peps_gs = load_object("VacStates/PEPS,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+        env_gs = load_object("VacStates/env,L=$L,m2=$m2,l=$l,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+
+        #Apply φ(0) to ∣Ω⟩
+        Ω = deepcopy(peps_gs)
+        Ω.A[n_0, n_0] = φ * Ω.A[n_0, n_0]
+
+        #Construct PEPS and env from φ(0)∣Ω⟩
+        println("Constructing φ(0)∣Ω⟩ iPEPS, environment, and weights...")
+        flush(stdout)
+        ψ = Ω #Initialize the iPEPS ψ as the excited vacuum state iPEPS Ω
+        env, info_ctmrg = leading_boundary(env_gs, ψ; boundary_alg...) #Initialize the env with ψ
+        flush(stderr)
+        wts = SUWeight(ψ) #Initialize the simple update weights with ψ
+        println("Done.")
+        flush(stdout)
     else
         #Load previous state
         ψ, env, wts = load("EvolStates/ECons,L=$L,m2=$m2,l=$l,ti=0.0,tf=$(parse(Float64, ARGS[13])),dt=$Δt,a=$a,dim=$Dim,D=$Dbond,chi=$χ.jld2")
+        println("Loaded state.")
+        flush(stdout)
     end
-    println("Loaded state.")
-    flush(stdout)
+
     return ψ, env, wts
 end
 
@@ -64,7 +81,6 @@ t_range = range(ti, tf, step=Δt) #Time range
 ### Initialize time evolution (real-time SimpleUpdate) ###
 trunc_peps = truncerror(; atol = 1e-10) & truncrank(Dbond)
 alg = SimpleUpdate(; trunc = trunc_peps, imaginary_time = false) #Time evolution algorithm
-boundary_alg = (; tol = 1e-8, trunc = (; alg = :FixedSpaceTruncation)) #CTMRG boundary algorithm
 
 ### Perform time evolution ###
 function Evolve()
